@@ -1,0 +1,29 @@
+# Deploys the demo stack on the demo machine, where a self-hosted runner with the label `demo` lives.
+#
+# Only a push to main deploys. Pull requests never reach this runner: the CI workflow runs them on GitHub's
+# machines, and the repository requires approval before any workflow of an outside collaborator runs.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-demo
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, linux, demo]
+    timeout-minutes: 20
+    env:
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      SECRET_KEY: ${{ secrets.SECRET_KEY }}
+      UNBIDDEN_RO_PASSWORD: ${{ secrets.UNBIDDEN_RO_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start the stack
+        run: docker compose up -d --build --wait
+      - name: Health
+        run: curl -fsS --retry 5 --retry-delay 3 http://127.0.0.1:8000/healthcheck

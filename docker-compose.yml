@@ -1,20 +1,41 @@
-# This is an example. Please change the configuration variables listed here.
+# The demo stack: the application and its PostgreSQL database, on one machine.
 #
-# This example uses a volume to persist the sqlite database outside of the container,
-# please adapt the local path.  If you use a custom PUID and PGID, you need to create
-# the local path beforehand with the correct user/group.
+# Secrets come from a `.env` file next to this file (see `.env.example`); nothing here is a real value.
+# The project name is fixed so that a deploy from any checkout updates the same stack.
 #
-# You can generate an admin password with: docker run -it --rm --entrypoint ihatemoney ihatemoney/ihatemoney:latest generate_password_hash
-# IMPORTANT: replace every dollar character in the result with a double dollar ($ -> $$)
-# To disable admin access, simply set the password to an empty string (ADMIN_PASSWORD=)
+#   cp .env.example .env            # then put real values in it
+#   docker compose up -d --build --wait
+#   curl -fsS http://127.0.0.1:8000/healthcheck
+#   docker compose exec app python /src/conf/seed_demo.py     # a realistic amount of data
 #
-# See https://ihatemoney.readthedocs.io/en/latest/configuration.html to understand all settings.
+# See https://ihatemoney.readthedocs.io/en/latest/configuration.html for every application setting.
 
-version: "3.9"
+name: ihatemoney-demo
 
 services:
-  ihatemoney:
-    image: ihatemoney/ihatemoney:latest
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ihatemoney
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ihatemoney
+      # A read-only role, created once at first start by conf/db-init/10-readonly.sh.
+      UNBIDDEN_RO_PASSWORD: ${UNBIDDEN_RO_PASSWORD:?set UNBIDDEN_RO_PASSWORD in .env}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./conf/db-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ihatemoney -d ihatemoney"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  app:
+    build: .
+    image: ihatemoney-demo:latest
+    depends_on:
+      db:
+        condition: service_healthy
     environment:
       - DEBUG=False
       - ACTIVATE_DEMO_PROJECT=True
@@ -30,10 +51,10 @@ services:
       - MAIL_USE_SSL=False
       - MAIL_USE_TLS=False
       - MAIL_USERNAME=
-      - SECRET_KEY=tralala
-      - SESSION_COOKIE_SECURE=True
+      - SECRET_KEY=${SECRET_KEY:?set SECRET_KEY in .env}
+      - SESSION_COOKIE_SECURE=False
       - SHOW_ADMIN_EMAIL=True
-      - SQLALCHEMY_DATABASE_URI=sqlite:////database/ihatemoney.db
+      - SQLALCHEMY_DATABASE_URI=postgresql+psycopg2://ihatemoney:${POSTGRES_PASSWORD}@db:5432/ihatemoney
       - SQLALCHEMY_TRACK_MODIFICATIONS=False
       - APPLICATION_ROOT=/
       - ENABLE_CAPTCHA=False
@@ -41,7 +62,14 @@ services:
       - PORT=8000
       - PUID=0
       - PGID=0
-    volumes:
-      - /path/to/local/dir/for/sqlite/db:/database
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8000/healthcheck | grep -q OK"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+volumes:
+  db-data:
