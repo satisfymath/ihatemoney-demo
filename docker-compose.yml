@@ -15,6 +15,8 @@ name: ihatemoney-demo
 services:
   db:
     image: postgres:17-alpine
+    # Queries slower than 200 ms land in the database's log, as an operated instance would have it.
+    command: ["postgres", "-c", "log_min_duration_statement=200"]
     environment:
       POSTGRES_USER: ihatemoney
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
@@ -33,6 +35,8 @@ services:
   app:
     build: .
     image: ihatemoney-demo:latest
+    # Extra gunicorn arguments (the entrypoint appends them): one access line per request (see conf/gunicorn_access.py).
+    command: ["--pythonpath", "/src/conf", "--logger-class", "gunicorn_access.AccessLogger", "--access-logfile", "-"]
     depends_on:
       db:
         condition: service_healthy

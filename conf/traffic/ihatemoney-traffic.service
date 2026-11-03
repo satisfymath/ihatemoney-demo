@@ -1,0 +1,16 @@
+# Steady simulated traffic on the demo machine, so the stack's logs and the database's statistics move the way a
+# used application's do: three people and one API client, about one request a second. A systemd user unit:
+#   cp conf/traffic/ihatemoney-traffic.service ~/.config/systemd/user/ && systemctl --user daemon-reload
+#   systemctl --user enable --now ihatemoney-traffic.service
+[Unit]
+Description=Simulated users against the ihatemoney demo stack (Locust, low rate)
+After=network.target
+
+[Service]
+WorkingDirectory=%h/ihatemoney-demo
+ExecStart=%h/.local/bin/uv tool run --from locust locust -f %h/ihatemoney-demo/loadtest/locustfile.py --headless -u 4 -r 1 --host http://127.0.0.1:8000 --only-summary
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target

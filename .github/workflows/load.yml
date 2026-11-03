@@ -1,0 +1,40 @@
+# A load run against the deployed demo stack, on the demo machine's runner: p50/p95 and errors per endpoint as the
+# job summary, the CSVs as an artifact. Nightly, and on demand.
+name: Load
+
+on:
+  workflow_dispatch:
+    inputs:
+      users: { description: "concurrent simulated users", default: "20" }
+      duration: { description: "run time, e.g. 2m", default: "2m" }
+  schedule:
+    - cron: "0 3 * * *"
+
+concurrency:
+  group: load-demo
+  cancel-in-progress: false
+
+jobs:
+  load:
+    runs-on: [self-hosted, linux, demo]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: The stack answers
+        run: curl -fsS --retry 5 --retry-delay 3 http://127.0.0.1:8000/healthcheck
+      - name: Load
+        run: sh loadtest/run.sh "${{ inputs.users || '20' }}" 5 "${{ inputs.duration || '2m' }}" http://127.0.0.1:8000 loadtest/out/run
+      - name: Summary
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import csv
+          rows = list(csv.DictReader(open("loadtest/out/run_stats.csv")))
+          print("| endpoint | requests | failures | median ms | p95 ms |")
+          print("|---|---:|---:|---:|---:|")
+          for r in rows:
+              print(f"| {r['Type']} {r['Name']} | {r['Request Count']} | {r['Failure Count']} | {r['Median Response Time']} | {r['95%']} |")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: load-${{ github.run_id }}
+          path: loadtest/out/

@@ -13,6 +13,10 @@ What was added, and only this:
 | `conf/seed_demo.py` | a realistic amount of data: 200 projects, 2 000 persons, 100 000 bills |
 | `.github/workflows/deploy.yml` | a push to `main` deploys the stack on the demo machine (self-hosted runner, label `demo`) |
 | `.env.example` | the three secrets the stack needs |
+| `conf/gunicorn_access.py` | keeps gunicorn's access log alive: upstream's Alembic `fileConfig` disables it at start, so `--access-logfile -` printed nothing; one line per request now, from configuration only |
+| `loadtest/locustfile.py`, `loadtest/run.sh` | simulated users (three browsing, one API client) for a load run against the stack |
+| `.github/workflows/load.yml` | a nightly or on-demand load run on the demo machine: p50/p95 and errors per endpoint as the job summary |
+| `conf/traffic/ihatemoney-traffic.service` | steady low-rate traffic on the demo machine (systemd user unit), so logs and database statistics move as a used application's do |
 
 Removed: `.github/dependabot.yml` and `.github/workflows/dockerhub.yml` (they would open pull requests and push images
 that are not this copy's to make). The upstream CI (`ci.yml`: lint, pytest against SQLite, PostgreSQL and MariaDB,
@@ -27,7 +31,8 @@ curl -fsS http://127.0.0.1:8000/healthcheck            # OK
 docker compose exec app python /src/conf/seed_demo.py  # once; a second run adds nothing
 ```
 
-The application answers at http://127.0.0.1:8000. Demo projects are `demo-0001` … `demo-0200`, password `demo`. The
+The application answers at http://127.0.0.1:8000, with one access line per request in `docker compose logs app`
+and queries slower than 200 ms in `docker compose logs db`. Demo projects are `demo-0001` … `demo-0200`, password `demo`. The
 database is not published on the host; read it inside its container (`docker compose exec db psql -U ihatemoney`) or
 grant the `unbidden_ro` role to whatever must read it over the network.
 
@@ -36,3 +41,21 @@ grant the `unbidden_ro` role to whatever must read it over the network.
 The `Deploy` workflow runs on a self-hosted runner on the demo machine, only on a push to `main`. The three secrets of
 `.env.example` are repository secrets with the same names. Pull requests run upstream's CI on GitHub's runners and
 never touch the demo machine.
+
+## Traffic
+
+A load run (20 users, 2 minutes, Locust through uv; writes `loadtest/out/run_*.csv`):
+
+```sh
+sh loadtest/run.sh                  # or: sh loadtest/run.sh 50 10 5m
+```
+
+The same run as the `Load` workflow (nightly at 03:00 UTC, or "Run workflow" on GitHub), on the demo machine. For
+steady traffic between runs, the systemd user unit in `conf/traffic/` keeps four simulated users going at about one
+request a second:
+
+```sh
+cp conf/traffic/ihatemoney-traffic.service ~/.config/systemd/user/ && systemctl --user daemon-reload
+systemctl --user enable --now ihatemoney-traffic.service
+journalctl --user -u ihatemoney-traffic -f
+```
